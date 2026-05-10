@@ -12,6 +12,15 @@ def mlp(in_dim, out_dim, hidden):
         nn.Linear(hidden, out_dim),
     )
 
+def deep_mlp(in_dim, out_dim, hidden, layers):
+    modules = []
+    for i in range(layers):
+        modules.append(nn.Linear(in_dim if i == 0 else hidden, hidden))
+        modules.append(nn.ReLU())
+
+    modules.append(nn.Linear(hidden, out_dim))
+    return nn.Sequential(*modules)
+
 
 class RLModel(nn.Module):
     """Minimal actor-critic model for discrete actions.
@@ -29,8 +38,8 @@ class RLModel(nn.Module):
         self.reward_scale = reward_scale
         self.gamma = gamma
 
-        self.policy = mlp(obs_dim, num_actions, hidden)
-        self.value = mlp(obs_dim, 1, hidden)
+        self.policy = deep_mlp(obs_dim, num_actions, hidden=128, layers=3)
+        self.value = deep_mlp(obs_dim, 1, hidden=128, layers=3)
 
         self.mse_loss = torch.nn.MSELoss()
 

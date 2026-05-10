@@ -1,4 +1,5 @@
 import argparse
+import os
 import numpy as np
 import torch
 
@@ -28,11 +29,17 @@ def main():
 
     envs = [make_env() for _ in range(args.n_envs)]
 
-    model = RLModel(obs_dim=8, num_actions=4, hidden=args.hidden,
+    if os.path.exists(args.save):
+        print(f"loading {args.save}")
+        model = RLModel(obs_dim=8, num_actions=4)
+        model.load(args.save)
+    else:
+        model = RLModel(obs_dim=8, num_actions=4, hidden=args.hidden,
                     reward_scale=args.reward_scale, gamma=args.gamma)
     if torch.cuda.is_available():
         model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.n_iterations)
 
     ep_return = np.zeros(args.n_envs, dtype=np.float32)
     completed = []
@@ -52,6 +59,8 @@ def main():
         losses = model.loss_a2c(rollout, entropy_coef=args.entropy_coef, value_coef=args.value_coef)
         losses["loss"].backward()
         optimizer.step()
+        scheduler.step()
+        optimizer.zero_grad()
 
         if it % args.log_every == 0:
             recent = completed[-50:] if completed else [0.0]
