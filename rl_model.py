@@ -80,8 +80,8 @@ class RLModel(nn.Module):
         for t in range(T):
             obs_t = self._rollout_last_obs
             logits, _ = self.forward(torch.from_numpy(obs_t).to(device))
-
-            actions = torch.argmax(logits, dim=-1)
+            categorical = torch.distributions.categorical.Categorical(logits=logits)
+            actions = categorical.sample()
 
             next_obs = np.zeros_like(obs_t)
             for i, env in enumerate(env_list):
@@ -140,7 +140,7 @@ class RLModel(nn.Module):
         tmp  = torch.zeros((B,)).to(device)
         returns = torch.zeros((B,T)).to(device)
         tmp = last_value
-        for t in range(T-1,0, -1):
+        for t in range(T-1,-1, -1):
             #Discount future rewards, when crossing episode boundary discard accumalted rewards
             tmp = self.gamma * tmp
             tmp *= (1-is_done[:, t])
@@ -155,13 +155,14 @@ class RLModel(nn.Module):
         #policy_loss_t (B,t)
         #TODO: Potential term?
         one_hot_actions = torch.nn.functional.one_hot(actions,num_classes=4)
-        policy_loss_t = -(returns-values)*torch.log(torch.sum(probabilities_t*one_hot_actions, dim=-1))
+        advantage = (returns - values).detach()
+        policy_loss_t = -(advantage)*torch.log(torch.sum(probabilities_t*one_hot_actions, dim=-1))
         policy_loss = torch.sum(policy_loss_t)
 
         # 3) compute the term of entropy regularizationo of the action distribution:
         # entropy = ...
 
-        entropy_t = torch.sum(probabilities_t*logits, dim=-1)
+        entropy_t = -torch.sum(probabilities_t*torch.log(probabilities_t), dim=-1)
         entropy = torch.sum(entropy_t)
 
         loss = policy_loss + value_coef * value_loss - entropy_coef * entropy

@@ -1,6 +1,8 @@
+from operator import index
 import os
 import numpy as np
 import torch
+import torch.distributions.categorical
 
 from rl_model import RLModel
 
@@ -18,6 +20,7 @@ class Agent:
                       info=None, action_mask=None):
         obs = torch.from_numpy(np.asarray(observation, dtype=np.float32))[None, :]
         logits, values = self.model(obs)
-        index = torch.argmax(logits)
+        categorical = torch.distributions.categorical.Categorical(logits=logits)
+        action = categorical.sample()[0]
 
-        return index.item()
+        return action.item()
