@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributions.utils
 
 
 def mlp(in_dim, out_dim, hidden):
@@ -30,6 +31,8 @@ class RLModel(nn.Module):
 
         self.policy = mlp(obs_dim, num_actions, hidden)
         self.value = mlp(obs_dim, 1, hidden)
+
+        self.mse_loss = torch.nn.MSELoss()
 
     def forward(self, observations):
         """observations: tensor of shape (..., obs_dim).
@@ -78,10 +81,7 @@ class RLModel(nn.Module):
             obs_t = self._rollout_last_obs
             logits, _ = self.forward(torch.from_numpy(obs_t).to(device))
 
-            ## TODO:
-            # Compute the action index using the model forward function:
-            # actions = ...
-            raise NotImplementedError("")
+            actions = torch.argmax(logits, dim=-1)
 
             next_obs = np.zeros_like(obs_t)
             for i, env in enumerate(env_list):
@@ -94,7 +94,7 @@ class RLModel(nn.Module):
                 done_buf[i, t] = float(done)
 
             obs_buf[:, t] = obs_t
-            act_buf[:, t] = actions
+            act_buf[:, t] = actions.cpu().numpy()
             logit_buf[:, t] = logits.cpu().numpy()
             self._rollout_last_obs = next_obs
 
@@ -135,14 +135,34 @@ class RLModel(nn.Module):
         # Warning: The episode ends when is_done is True
         # returns = ...
         #
-        # 2) We will implement the A2C actor critic algorithm.
-        # Compute the following losses
-        # value_loss = ...
-        # policy_loss = ...
-        #
+        
+        #returns (B,T)
+        tmp  = torch.zeros((B,)).to(device)
+        returns = torch.zeros((B,T)).to(device)
+        tmp = last_value
+        for t in range(T-1,0, -1):
+            #Discount future rewards, when crossing episode boundary discard accumalted rewards
+            tmp = self.gamma * tmp
+            tmp *= (1-is_done[:, t])
+
+            tmp += rewards[:,t]
+            returns[:, t] = tmp
+
+        value_loss = self.mse_loss(values, returns)*T
+
+        probabilities_t = torch.distributions.utils.logits_to_probs(logits)
+
+        #policy_loss_t (B,t)
+        #TODO: Potential term?
+        one_hot_actions = torch.nn.functional.one_hot(actions,num_classes=4)
+        policy_loss_t = -(returns-values)*torch.log(torch.sum(probabilities_t*one_hot_actions, dim=-1))
+        policy_loss = torch.sum(policy_loss_t)
+
         # 3) compute the term of entropy regularizationo of the action distribution:
         # entropy = ...
-        raise NotImplementedError("")
+
+        entropy_t = torch.sum(probabilities_t*logits, dim=-1)
+        entropy = torch.sum(entropy_t)
 
         loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
 
